@@ -31,8 +31,9 @@ async function injectContentScript(tabId) {
         files: ['content.js']
       });
     } else {
-      await browser.tabs.executeScript(tabId, {
-        file: 'content.js'
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['content.js']
       });
     }
   } catch (error) {
@@ -160,39 +161,34 @@ async function enhanceWithOpenAI(prompt) {
 
 async function enhanceWithAnthropic(prompt) {
   const { apiKey, llmModel, customEndpoint } = await browserAPI.storage.sync.get(['apiKey', 'llmModel', 'customEndpoint']);
-
   if (!apiKey) {
     throw new Error('Anthropic API key not set. Please set it in the extension options.');
   }
-
   if (!llmModel) {
     throw new Error('LLM model not set for Anthropic. Please set it in the extension options.');
   }
-
-  const endpoint = customEndpoint || 'https://api.anthropic.com/v1/complete';
-
+  const endpoint = customEndpoint || 'https://api.anthropic.com/v1/messages';
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',  // ← add this line
       },
       body: JSON.stringify({
-        prompt: `Human: ${prompt}\n\nAssistant:`,
         model: llmModel,
-        max_tokens_to_sample: 1000,
-        temperature: 0.7,
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
       }),
     });
-
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Anthropic API request failed: ${errorData.error || 'Unknown error'}`);
+      throw new Error(`Anthropic API request failed: ${errorData.error?.message || JSON.stringify(errorData)}`);
     }
-
     const data = await response.json();
-    return data.completion.trim();
+    return data.content[0].text.trim();
   } catch (error) {
     throw new Error(`Failed to enhance text with Anthropic. Error: ${error.message}`);
   }
